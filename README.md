@@ -5,7 +5,6 @@
 ## 启动
 
 ```powershell
-cd C:\Users\victory\Desktop\esp烧录
 python esp32_flasher_gui.py
 ```
 
