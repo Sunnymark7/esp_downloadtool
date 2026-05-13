@@ -1,0 +1,12 @@
+ESP32 一键下载工具
+
+使用方法：
+1. 解压 ESP32Flasher_release.zip。
+2. 保持 ESP32Flasher.exe 和 esptool_runner.exe 在同一个目录。
+3. 双击 ESP32Flasher.exe。
+4. 选择固件 ZIP，确认串口后点击“开始下载”。
+
+注意：
+- 不要单独移动 ESP32Flasher.exe，否则会缺少烧录辅助程序。
+- 如果下载失败，可按住开发板 BOOT 键后重试。
+- 开发者模式用于手动调整芯片、波特率、Flash 参数和烧录地址。

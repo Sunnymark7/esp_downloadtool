@@ -2,11 +2,25 @@
 
 用于把 ZIP 固件包自动识别后下载到 ESP32。默认是用户模式，只保留选择固件、选择/自动识别串口、开始下载几个核心操作。
 
-## 启动
+## 目录结构
+
+```text
+assets/                 图标资源
+packaging/              PyInstaller 打包配置和 Windows 版本信息
+release/                发布说明和发布压缩包
+scripts/                辅助脚本，例如图标生成
+src/                    应用源码
+requirements.txt        Python 依赖
+README.md               项目说明
+```
+
+`build/`、`dist/`、`__pycache__/` 是生成目录，不进入 Git。
+
+## 源码运行
 
 ```powershell
 cd C:\Users\victory\Desktop\esp烧录
-python esp32_flasher_gui.py
+python src\esp32_flasher_gui.py
 ```
 
 ## 用户模式
@@ -47,12 +61,32 @@ firmware.zip
 
 下载时界面会显示综合进度条和当前状态。进度会覆盖准备、串口识别、板子连接、擦除、写入、校验、复位和完成阶段；完成或失败后会弹窗提醒。
 
-## EXE 打包结果
+## 打包
 
-打包后的文件在 `dist` 目录：
+先安装依赖：
 
-- `ESP32Flasher.exe`：主程序，双击运行。
-- `esptool_runner.exe`：烧录辅助程序，必须和主程序放在同一目录。
+```powershell
+python -m pip install -r requirements.txt
+```
 
-分发时请把 `dist` 目录中的两个 EXE 一起发送，或使用生成的 `ESP32Flasher_release.zip`。
+生成图标：
 
+```powershell
+python scripts\create_icon.py
+```
+
+打包辅助烧录程序：
+
+```powershell
+python -m PyInstaller --noconfirm --clean packaging\esptool_runner.spec
+```
+
+打包主程序：
+
+```powershell
+python -m PyInstaller --noconfirm --clean packaging\ESP32Flasher.spec
+```
+
+发布时需要把 `dist\ESP32Flasher.exe` 和 `dist\esptool_runner.exe` 放在同一目录。也可以直接使用 `release\ESP32Flasher_release.zip`。
+
+EXE 属性信息中的公司名已设置为“元思科技”，该信息不会显示在软件界面中。
