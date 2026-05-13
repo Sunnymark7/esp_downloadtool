@@ -19,7 +19,6 @@ README.md               项目说明
 ## 源码运行
 
 ```powershell
-cd C:\Users\victory\Desktop\esp烧录
 python src\esp32_flasher_gui.py
 ```
 
