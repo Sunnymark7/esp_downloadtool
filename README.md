@@ -19,11 +19,7 @@ README.md               项目说明
 ## 源码运行
 
 ```powershell
-<<<<<<< HEAD
 python src\esp32_flasher_gui.py
-=======
-python esp32_flasher_gui.py
->>>>>>> ef4728052f6b02090edff0e6c6e2dd4dcde25114
 ```
 
 ## 用户模式
