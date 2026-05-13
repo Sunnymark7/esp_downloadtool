@@ -8,13 +8,10 @@
 assets/                 图标资源
 packaging/              PyInstaller 打包配置和 Windows 版本信息
 release/                发布说明和发布压缩包
-scripts/                辅助脚本，例如图标生成
 src/                    应用源码
 requirements.txt        Python 依赖
 README.md               项目说明
 ```
-
-`build/`、`dist/`、`__pycache__/` 是生成目录，不进入 Git。
 
 ## 源码运行
 
@@ -43,7 +40,7 @@ python src\esp32_flasher_gui.py
 - 是否整片擦除 Flash
 - 烧录文件和地址
 
-开发者模式内容在窗口内部滚动显示，切换模式不会自动改变窗口大小。
+开发者模式内容在窗口内部滚动显示
 
 ## 固件包结构
 
@@ -88,4 +85,4 @@ python -m PyInstaller --noconfirm --clean packaging\ESP32Flasher.spec
 
 发布时需要把 `dist\ESP32Flasher.exe` 和 `dist\esptool_runner.exe` 放在同一目录。也可以直接使用 `release\ESP32Flasher_release.zip`。
 
-EXE 属性信息中的公司名已设置为“元思科技”，该信息不会显示在软件界面中。
+EXE 属性信息中的公司名已设置为“元思科技”。
