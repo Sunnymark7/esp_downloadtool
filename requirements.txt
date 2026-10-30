@@ -1,2 +1,4 @@
 esptool>=5.0
 pyserial>=3.5
+pyinstaller>=6.0
+pillow>=10.0

@@ -1,88 +1,55 @@
-# ESP32 一键下载工具
+# Ys元思烧录平台
 
-用于把 ZIP 固件包自动识别后下载到 ESP32。默认是用户模式，只保留选择固件、选择/自动识别串口、开始下载几个核心操作。
+Windows 桌面工具，集成 ESP32 串口下载与 AirHand 批量无线 OTA。发布版只需一个 **Ys元思烧录平台.exe**，无需安装 Python，也不用单独携带辅助烧录器。
 
-## 目录结构
+## 串口下载
+
+选择固件 ZIP、选择或自动识别串口，然后开始下载。工具保留高速下载失败自动降速，以及开发者参数、手动文件地址、可选擦除等原有功能。ZIP 中的 `flasher_args.json` 优先用于确定真实地址；其次解析 flash_args，最后才使用文件名规则。
+
+开发者模式可设置芯片、波特率、Flash mode/freq/size、复位方式、烧录地址和整片擦除。整片擦除默认关闭。没有地址清单的单文件包仍沿用原工具的 `0x0` 规则；单独应用镜像请确认烧录地址或使用 OTA。
+
+## 批量 OTA
+
+1. 切换到顶部的“批量 OTA”。
+2. 点击“扫描设备”：等待无线网卡扫描完成，执行三轮扫描并合并去重，然后逐台只读查询 MAC 和当前固件版本，完成后恢复原 Wi-Fi。识别不会登录、烧录或启动气泵。
+3. 选择与设备匹配的 AirHand `firmware.bin`，在列表中多选目标，点击“开始批量升级”。
+4. 工具自动连接目标、检查 OTA 分区容量、登录上传，并核对升级后的 MAC、镜像 SHA-256、目标分区与 `VALID` 状态。完成后恢复原网络。
+
+一个 Wi-Fi 网卡按设备顺序工作，无需逐台手动配网。默认使用已有 AirHand 账号；只支持已经安装本工程 Web OTA 接口的设备，不会让没有 OTA 功能的旧设备自动获得升级能力。固件兼容标识为 `AirHand-S3-N16R8-noPSRAM-v1`。
+
+可以停止版本读取，或在当前设备完成升级后停止剩余队列；不会中途强制关闭正在写入的设备。双击列表行查看失败原因。每批升级记录保存在 **文档/Ys元思烧录平台/ota-reports**，包括设备 MAC、前后版本/分区、结果与固件哈希，不保存登录令牌。
+
+扫描期间电脑会临时离开原 Wi-Fi。Windows 如果拒绝扫描，页面会提示检查 Wi-Fi 和定位权限；程序不会更改系统隐私设置。
+
+扫描使用实际广播 BSS 记录的接收时间，过滤超过 10 秒未收到广播的缓存。重新扫描会补充新设备、保留原来已读的版本；本轮未找到的旧设备标记“本轮未发现”并取消选择，避免把旧缓存当成在线设备。“识别失败”表示发现了热点但没读到版本，双击查看原因。热点关闭、被固件的从机策略隐藏、超出无线范围的设备无法靠电脑扫描发现；分轮扫描不能让隐藏的热点重新广播。
+
+## 文件拖放与小窗口
+
+将一个 ZIP 拖入窗口，会切换到串口下载并解析固件包；将一个 AirHand 应用 BIN 拖入，会校验兼容信息并切换到批量 OTA。支持中文和空格路径。拖入后选择串口或目标设备，再点击开始；不会仅因拖入文件就写入设备。任务进行中不能替换固件，多个文件、目录、错误类型和不兼容 BIN 会被拒绝。
+
+2.1 版初始窗口根据屏幕工作区确定尺寸，支持更小窗口。主要内容可垂直滚动，状态和开始/停止操作固定在底部；设备列表可横向、纵向滚动；开发者参数分行排列；长路径和长状态自动换行。
+
+## 界面与品牌
+
+窗口名称和 exe 名称为“Ys元思烧录平台”，页内标题为“烧录平台”。使用项目中的品牌 PNG，右下角大面积底纹只保留图形符号，不含品牌文字。底纹通过原生透明拥有者窗口、预乘 alpha 混合绘制，避免 Tk 重画实色背景和色键边缘杂色，支持鼠标穿透，随主窗口移动、缩放和最小化。Per-Monitor V2 manifest 和运行前 DPI 配置避免系统位图拉伸，字体与图片按实际显示密度绘制。
+
+## 开发与打包
+
+```powershell
+python -m venv .venv
+.venv\Scripts\python.exe -m pip install -r requirements.txt
+.venv\Scripts\python.exe src\esp32_flasher_gui.py
+.venv\Scripts\python.exe -m unittest discover -s tests -v
+.venv\Scripts\python.exe -m PyInstaller --noconfirm --clean packaging\ESP32Flasher.spec
+```
+
+产物：`dist/Ys元思烧录平台.exe`。esptool 通过同一 exe 的内部工作模式运行，资源、依赖、图标和 DPI manifest 均已内置。原来的双 exe spec 保留作为历史兼容文件，发布时只使用主 spec。
 
 ```text
-assets/                 图标资源
-packaging/              PyInstaller 打包配置和 Windows 版本信息
-release/                发布说明和发布压缩包
-src/                    应用源码
-requirements.txt        Python 依赖
-README.md               项目说明
+src/         GUI、品牌合成、原生 Windows WLAN 与批量 OTA 编排
+assets/      原始品牌 PNG 和应用图标
+packaging/   单文件 PyInstaller 配置、版本信息和 DPI manifest
+tests/       网络隔离的升级/版本识别回归测试
 ```
 
-## 源码运行
-
-```powershell
-python src\esp32_flasher_gui.py
-```
-
-## 用户模式
-
-- 选择固件 ZIP。
-- 工具自动识别 `bootloader.bin`、分区表和主程序。
-- 没有配置文件时，默认从 `0x0` 开始烧录；单文件固件默认地址也是 `0x0`。
-- 串口默认自动识别。
-- 芯片默认使用 `--chip auto`，由 esptool 自动识别板子。
-- 波特率默认使用快速自动：先直接用 `921600` 下载，失败再降到 `460800`、`230400`、`115200`。
-- 不再单独执行 `chip-id` 预探测，减少连接步骤，提高下载速度。
-
-## 开发者模式
-
-可手动调整：
-
-- 芯片型号
-- 波特率
-- Flash mode / freq / size
-- 烧录后复位方式
-- 是否整片擦除 Flash
-- 烧录文件和地址
-
-开发者模式内容在窗口内部滚动显示
-
-## 固件包结构
-
-推荐：
-
-```text
-firmware.zip
-├─ bootloader.bin
-├─ partition-table.bin
-└─ app.bin
-```
-
-如果 ZIP 内包含 ESP-IDF 的 `flasher_args.json`，工具会优先使用其中的真实烧录地址。
-
-下载时界面会显示综合进度条和当前状态。进度会覆盖准备、串口识别、板子连接、擦除、写入、校验、复位和完成阶段；完成或失败后会弹窗提醒。
-
-## 打包
-
-先安装依赖：
-
-```powershell
-python -m pip install -r requirements.txt
-```
-
-生成图标：
-
-```powershell
-python scripts\create_icon.py
-```
-
-打包辅助烧录程序：
-
-```powershell
-python -m PyInstaller --noconfirm --clean packaging\esptool_runner.spec
-```
-
-打包主程序：
-
-```powershell
-python -m PyInstaller --noconfirm --clean packaging\ESP32Flasher.spec
-```
-
-发布时需要把 `dist\ESP32Flasher.exe` 和 `dist\esptool_runner.exe` 放在同一目录。也可以直接使用 `release\ESP32Flasher_release.zip`。
-
-EXE 属性信息中的公司名已设置为“元思科技”。
+验证涵盖固件头识别、错误目标拒绝、版本只读查询、失败/取消/丢失响应、镜像校验条件、网络恢复、分轮扫描结果合并、三种窗口尺寸、开发者模式、长路径/长状态，以及真实 WM_DROPFILES 消息中的中文文件路径。原串口烧录流程保留；本次没有对实机执行串口擦写。真实多设备同时在场的连续升级速度仍需现场测试；单网卡串行不会被界面描述为并行升级。

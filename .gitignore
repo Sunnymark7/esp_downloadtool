@@ -6,3 +6,5 @@ dist/
 *.tmp
 .pytest_cache/
 .mypy_cache/
+.venv/
+outputs/

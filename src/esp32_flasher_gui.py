@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from tkinter import filedialog, messagebox, ttk
 
 
-APP_TITLE = "ESP32 一键下载工具"
+APP_TITLE = "Ys元思烧录平台"
 AUTO_PORT_LABEL = "自动识别串口"
 FAST_AUTO_BAUD_LABEL = "快速自动"
 USER_MODE = "用户模式"
@@ -40,8 +40,7 @@ def resource_path(relative_path):
 
 def esptool_command_prefix():
     if getattr(sys, "frozen", False):
-        helper_path = os.path.join(os.path.dirname(sys.executable), "esptool_runner.exe")
-        return [helper_path]
+        return [sys.executable, "--run-esptool"]
     return [sys.executable, "-m", "esptool"]
 
 
@@ -290,11 +289,11 @@ class FlashRow(ttk.Frame):
         self.offset_var = tk.StringVar(value=offset)
         self.path_var = tk.StringVar(value=path)
 
-        ttk.Combobox(self, textvariable=self.role_var, values=(ROLE_BOOTLOADER, ROLE_PARTITION, ROLE_APP, ROLE_OTHER), width=12, state="readonly").grid(row=0, column=0, padx=(0, 8), sticky="ew")
-        ttk.Entry(self, width=11, textvariable=self.offset_var).grid(row=0, column=1, padx=(0, 8), sticky="ew")
-        ttk.Entry(self, textvariable=self.path_var).grid(row=0, column=2, padx=(0, 8), sticky="ew")
-        ttk.Button(self, text="选择", width=7, command=self.choose_file).grid(row=0, column=3, padx=(0, 8))
-        ttk.Button(self, text="移除", width=7, command=self.remove).grid(row=0, column=4)
+        ttk.Combobox(self, textvariable=self.role_var, values=(ROLE_BOOTLOADER, ROLE_PARTITION, ROLE_APP, ROLE_OTHER), width=8, state="readonly").grid(row=0, column=0, padx=(0, 8), sticky="ew")
+        ttk.Entry(self, width=9, textvariable=self.offset_var).grid(row=0, column=1, padx=(0, 8), sticky="ew")
+        ttk.Entry(self, width=1, textvariable=self.path_var).grid(row=0, column=2, padx=(0, 8), sticky="ew")
+        ttk.Button(self, text="选择", width=5, command=self.choose_file).grid(row=0, column=3, padx=(0, 8))
+        ttk.Button(self, text="移除", width=5, command=self.remove).grid(row=0, column=4)
         self.columnconfigure(2, weight=1)
 
     def choose_file(self):
@@ -315,17 +314,28 @@ class FlashRow(ttk.Frame):
 
 class Esp32FlasherApp(tk.Tk):
     def __init__(self):
+        from display import enable_high_dpi
+        enable_high_dpi()
         super().__init__()
         self.title(APP_TITLE)
-        icon_path = resource_path(os.path.join("assets", "esp32_flasher.ico"))
+        icon_path = resource_path(os.path.join("assets", "ysneuro.ico"))
         if os.path.exists(icon_path):
             self.iconbitmap(icon_path)
-        self.geometry("760x560")
-        self.minsize(680, 500)
+        # Tk 字体以 point 为单位；尺寸也按当前 DPI 同步扩展，保持清晰且不裁切。
+        scale = self.winfo_fpixels("1i") / 96.0
+        self.ui_scale = scale
+        from display import work_area
+        left, top, right, bottom = work_area(self)
+        width = min(round(880 * scale), right - left - 32)
+        height = min(round(730 * scale), bottom - top - round(50 * scale))
+        self.geometry(f"{width}x{height}+{left + max(0, (right-left-width)//2)}+{top+16}")
+        self.minsize(min(round(580*scale), width), min(round(460*scale), height))
 
         self.log_queue = queue.Queue()
         self.process = None
         self.worker = None
+        self.running = False
+        self.stop_requested = threading.Event()
         self.rows = []
         self.package_temp_dir = ""
         self.flash_entries = []
@@ -346,10 +356,14 @@ class Esp32FlasherApp(tk.Tk):
         self.progress_var = tk.DoubleVar(value=0)
         self.progress_text_var = tk.StringVar(value="进度：0%")
 
-        self.configure(bg="#eef3f8")
+        self.configure(bg="#f4f8f7")
         self.protocol("WM_DELETE_WINDOW", self.on_close)
         self._configure_style()
         self._build_ui()
+        from brand_ui import PageWatermark
+        self.page_watermark = PageWatermark(self, resource_path("assets/ysneuro-logo-teal.png"), scale)
+        from file_drop import WindowsFileDrop
+        self.file_drop = WindowsFileDrop(self, self.load_dropped_files)
         self.refresh_ports()
         self.mode_var.trace_add("write", lambda *_: self.apply_mode())
         self.after(100, self.drain_log_queue)
@@ -358,109 +372,126 @@ class Esp32FlasherApp(tk.Tk):
         style = ttk.Style(self)
         style.theme_use("clam")
         self.option_add("*Font", ("Microsoft YaHei UI", 10))
-        style.configure("App.TFrame", background="#eef3f8")
+        style.configure(".", font=("Microsoft YaHei UI", 10))
+        style.configure("App.TFrame", background="#f4f8f7")
         style.configure("Panel.TFrame", background="#ffffff")
-        style.configure("Title.TLabel", background="#14324a", foreground="#ffffff", font=("Microsoft YaHei UI", 18, "bold"))
-        style.configure("SubTitle.TLabel", background="#14324a", foreground="#c9d6e2")
-        style.configure("Card.TLabelframe", background="#ffffff", bordercolor="#d6dee8", relief="solid")
-        style.configure("Card.TLabelframe.Label", background="#ffffff", foreground="#18324a", font=("Microsoft YaHei UI", 11, "bold"))
+        style.configure("PageTitle.TLabel", background="#f4f8f7", foreground="#183b39", font=("Microsoft YaHei UI", 15, "bold"))
+        style.configure("Card.TLabelframe", background="#ffffff", bordercolor="#dce7e3", relief="solid", borderwidth=1)
+        style.configure("Card.TLabelframe.Label", background="#ffffff", foreground="#234f49", font=("Microsoft YaHei UI", 10, "bold"))
         style.configure("TLabel", background="#ffffff", foreground="#263747")
-        style.configure("Muted.TLabel", background="#ffffff", foreground="#718096")
-        style.configure("Status.TLabel", background="#eef3f8", foreground="#52616f")
-        style.configure("Primary.TButton", background="#0f766e", foreground="#ffffff", padding=(16, 10), borderwidth=0)
-        style.map("Primary.TButton", background=[("active", "#115e59"), ("disabled", "#9bb8b5")])
+        style.configure("Muted.TLabel", background="#ffffff", foreground="#626267")
+        style.configure("Status.TLabel", background="#f4f8f7", foreground="#526c69")
+        style.configure("Primary.TButton", background="#007e78", foreground="#ffffff", padding=(16, 10), borderwidth=0)
+        style.map("Primary.TButton", background=[("disabled", "#c8dcd8"), ("active", "#006a65")], foreground=[("disabled", "#536d68")])
         style.configure("Danger.TButton", background="#b42318", foreground="#ffffff", padding=(12, 8), borderwidth=0)
-        style.configure("TButton", padding=(10, 7), background="#e6edf5", foreground="#1f2d3d", borderwidth=0)
+        style.map("Danger.TButton", background=[("disabled", "#eef1f0"), ("active", "#982218")], foreground=[("disabled", "#6a7773")])
+        style.configure("TButton", padding=(10, 7), background="#e7efed", foreground="#234f49", borderwidth=0)
+        style.map("TButton", background=[("active", "#d8e7e3")])
         style.configure("TCheckbutton", background="#ffffff", foreground="#263747")
-        style.configure("TRadiobutton", background="#eef3f8", foreground="#263747")
+        style.configure("TEntry", fieldbackground="#ffffff", foreground="#183b39", bordercolor="#c5d5cf", padding=5)
+        style.configure("TCombobox", fieldbackground="#ffffff", background="#ffffff", foreground="#183b39", bordercolor="#c5d5cf", padding=5)
+        style.map("TCombobox", fieldbackground=[("readonly", "#ffffff")], selectbackground=[("readonly", "#ffffff")], selectforeground=[("readonly", "#183b39")])
+        style.configure("TRadiobutton", background="#f4f8f7", foreground="#263747")
+        style.configure("TNotebook", background="#f4f8f7", borderwidth=0)
+        style.configure("TNotebook.Tab", padding=(20, 8), background="#e8f0ed", foreground="#526c69")
+        style.map("TNotebook.Tab", background=[("selected", "#ffffff")], foreground=[("selected", "#007e78")])
+        style.configure("Treeview", rowheight=round(32*self.winfo_fpixels('1i')/96), background="#ffffff", fieldbackground="#ffffff", foreground="#1d1d1f", borderwidth=0)
+        style.map("Treeview", background=[("selected", "#d5ebe5")], foreground=[("selected", "#18564d")])
+        style.configure("Treeview.Heading", background="#f1f1f4", foreground="#626267", padding=(8, 8))
         style.configure(
             "Green.Horizontal.TProgressbar",
             troughcolor="#dfe7ef",
-            background="#16a34a",
-            lightcolor="#16a34a",
-            darkcolor="#15803d",
+            background="#007e78",
+            lightcolor="#007e78",
+            darkcolor="#006a65",
             bordercolor="#dfe7ef",
         )
 
     def _build_ui(self):
-        root = ttk.Frame(self, padding=16, style="App.TFrame")
-        root.pack(fill="both", expand=True)
-
-        header = tk.Frame(root, bg="#14324a", padx=18, pady=14)
-        header.pack(fill="x", pady=(0, 12))
-        ttk.Label(header, text=APP_TITLE, style="Title.TLabel").pack(anchor="w")
-        ttk.Label(header, text="选择固件包，自动识别板子和串口，快速下载", style="SubTitle.TLabel").pack(anchor="w", pady=(4, 0))
-
+        from brand_ui import BrandHeader
+        from layout import ScrollableContent, wrapping_label
+        from ota_ui import OtaPage
+        shell = ttk.Frame(self, padding=(16, 8, 16, 10), style="App.TFrame")
+        shell.pack(fill="both", expand=True)
+        header = BrandHeader(shell, resource_path("assets/ysneuro-logo-teal.png"), self.ui_scale)
+        header.pack(fill="x", pady=(0, 4))
+        self.notebook = ttk.Notebook(shell)
+        self.notebook.pack(fill="both", expand=True)
+        serial = ttk.Frame(self.notebook, padding=12, style="App.TFrame")
+        serial.columnconfigure(0, weight=1)
+        serial.rowconfigure(0, weight=1)
+        self.notebook.add(serial, text="串口下载")
+        self.ota_page = OtaPage(self.notebook)
+        self.notebook.add(self.ota_page, text="批量 OTA")
+        self.serial_scroll = ScrollableContent(serial)
+        self.serial_scroll.grid(row=0, column=0, sticky="nsew")
+        root = self.serial_scroll.content
         mode_bar = ttk.Frame(root, style="App.TFrame")
-        mode_bar.pack(fill="x", pady=(0, 10))
+        mode_bar.pack(fill="x", pady=(0, 12))
         ttk.Radiobutton(mode_bar, text="用户模式", variable=self.mode_var, value=USER_MODE).pack(side="left")
         ttk.Radiobutton(mode_bar, text="开发者模式", variable=self.mode_var, value=DEVELOPER_MODE).pack(side="left", padx=(16, 0))
-
-        main = ttk.LabelFrame(root, text="下载", padding=14, style="Card.TLabelframe")
+        main = ttk.LabelFrame(root, text="下载固件", padding=12, style="Card.TLabelframe")
         main.pack(fill="x")
-
-        ttk.Label(main, text="固件包").grid(row=0, column=0, sticky="w")
-        ttk.Label(main, textvariable=self.package_var, style="Muted.TLabel", wraplength=520).grid(row=1, column=0, columnspan=2, sticky="ew", pady=(2, 10))
-        ttk.Button(main, text="选择固件 ZIP", command=self.choose_package, style="Primary.TButton").grid(row=1, column=2, sticky="ew", padx=(12, 0))
-
-        ttk.Label(main, text="串口").grid(row=2, column=0, sticky="w")
-        self.port_combo = ttk.Combobox(main, textvariable=self.port_var, state="readonly")
-        self.port_combo.grid(row=3, column=0, sticky="ew", pady=(2, 10))
-        ttk.Button(main, text="刷新", command=self.refresh_ports).grid(row=3, column=1, sticky="ew", padx=(8, 12), pady=(2, 10))
-        self.flash_button = ttk.Button(main, text="开始下载", command=self.start_flash, style="Primary.TButton")
-        self.flash_button.grid(row=3, column=2, sticky="ew", pady=(2, 10))
-
-        ttk.Label(main, textvariable=self.firmware_summary_var, style="Muted.TLabel").grid(row=4, column=0, columnspan=2, sticky="w")
-        ttk.Label(main, textvariable=self.board_var, style="Muted.TLabel").grid(row=5, column=0, columnspan=2, sticky="w", pady=(4, 0))
-        ttk.Label(main, textvariable=self.progress_text_var, style="Muted.TLabel").grid(row=6, column=0, columnspan=3, sticky="w", pady=(10, 0))
-        self.progress_bar = ttk.Progressbar(main, variable=self.progress_var, maximum=100, style="Green.Horizontal.TProgressbar")
-        self.progress_bar.grid(row=7, column=0, columnspan=3, sticky="ew", pady=(4, 0))
-        self.stop_button = ttk.Button(main, text="停止", command=self.stop_flash, state="disabled", style="Danger.TButton")
-        self.stop_button.grid(row=4, column=2, rowspan=2, sticky="nsew", pady=(2, 0))
         main.columnconfigure(0, weight=1)
-        main.columnconfigure(2, weight=0)
-
+        ttk.Label(main, text="ZIP 固件包").grid(row=0, column=0, sticky="w")
+        self.package_button = ttk.Button(main, text="选择 ZIP", command=self.choose_package)
+        self.package_button.grid(row=0, column=1, sticky="e", padx=(10, 0))
+        wrapping_label(main, textvariable=self.package_var, style="Muted.TLabel").grid(row=1, column=0, columnspan=2, sticky="ew", pady=(6, 4))
+        ttk.Label(main, text="可将 ZIP 拖入窗口；BIN 自动进入无线升级。", style="Muted.TLabel").grid(row=2, column=0, columnspan=2, sticky="w", pady=(0, 12))
+        ttk.Label(main, text="串口").grid(row=3, column=0, sticky="w")
+        self.port_combo = ttk.Combobox(main, textvariable=self.port_var, width=1, state="readonly")
+        self.port_combo.grid(row=4, column=0, sticky="ew", pady=(4, 12))
+        ttk.Button(main, text="刷新串口", command=self.refresh_ports).grid(row=4, column=1, sticky="ew", padx=(10, 0), pady=(4, 12))
+        wrapping_label(main, textvariable=self.firmware_summary_var, style="Muted.TLabel").grid(row=5, column=0, columnspan=2, sticky="ew")
+        wrapping_label(main, textvariable=self.board_var, style="Muted.TLabel").grid(row=6, column=0, columnspan=2, sticky="ew", pady=(4, 0))
         self.developer_frame = ttk.Frame(root, style="App.TFrame")
-        self.developer_canvas = tk.Canvas(self.developer_frame, bg="#eef3f8", highlightthickness=0)
-        self.developer_scrollbar = ttk.Scrollbar(self.developer_frame, orient="vertical", command=self.developer_canvas.yview)
-        self.developer_content = ttk.Frame(self.developer_canvas, style="App.TFrame")
-        self.developer_window = self.developer_canvas.create_window((0, 0), window=self.developer_content, anchor="nw")
-        self.developer_canvas.configure(yscrollcommand=self.developer_scrollbar.set)
-        self.developer_canvas.pack(side="left", fill="both", expand=True)
-        self.developer_scrollbar.pack(side="right", fill="y")
-        self.developer_content.bind("<Configure>", self.update_developer_scrollregion)
-        self.developer_canvas.bind("<Configure>", self.resize_developer_window)
-        self.developer_canvas.bind("<MouseWheel>", self.on_developer_mousewheel)
-        self.developer_content.bind("<MouseWheel>", self.on_developer_mousewheel)
-        self._build_developer_ui(self.developer_content)
-
+        self._build_developer_ui(self.developer_frame)
         log_frame = ttk.LabelFrame(root, text="状态日志", padding=8, style="Card.TLabelframe")
         log_frame.pack(fill="both", expand=True, pady=(12, 0))
-        self.log_text = tk.Text(log_frame, height=8, wrap="word", state="disabled", bg="#101820", fg="#d8e5ee", relief="flat", padx=10, pady=10, font=("Consolas", 10))
-        self.log_text.pack(fill="both", expand=True)
-        ttk.Label(root, textvariable=self.status_var, anchor="w", style="Status.TLabel").pack(fill="x", pady=(8, 0))
+        log_frame.columnconfigure(0, weight=1)
+        log_frame.rowconfigure(0, weight=1)
+        self.log_text = tk.Text(log_frame, width=1, height=6, wrap="word", state="disabled", bg="#f7f9f8", fg="#3b514b", relief="flat", padx=8, pady=8, font=("Microsoft YaHei UI", 10))
+        self.log_text.grid(row=0, column=0, sticky="nsew")
+        log_scrollbar = ttk.Scrollbar(log_frame, command=self.log_text.yview)
+        log_scrollbar.grid(row=0, column=1, sticky="ns")
+        self.log_text.configure(yscrollcommand=log_scrollbar.set)
+        footer = ttk.Frame(serial, style="App.TFrame", padding=(0, 10, 0, 0))
+        footer.grid(row=1, column=0, sticky="ew")
+        footer.columnconfigure(0, weight=1)
+        wrapping_label(footer, textvariable=self.status_var, style="Status.TLabel").grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 6))
+        self.stop_button = ttk.Button(footer, text="停止下载", command=self.stop_flash, state="disabled")
+        self.stop_button.grid(row=1, column=0, sticky="e", padx=(0, 8))
+        self.flash_button = ttk.Button(footer, text="开始下载", command=self.start_flash, style="Primary.TButton")
+        self.flash_button.grid(row=1, column=1, sticky="e")
+        wrapping_label(footer, textvariable=self.progress_text_var, style="Status.TLabel").grid(row=2, column=0, columnspan=2, sticky="ew", pady=(6, 0))
+        self.progress_bar = ttk.Progressbar(footer, variable=self.progress_var, maximum=100, style="Green.Horizontal.TProgressbar")
+        self.progress_bar.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(4, 0))
         self.apply_mode()
 
     def _build_developer_ui(self, parent):
         settings = ttk.LabelFrame(parent, text="开发者参数", padding=12, style="Card.TLabelframe")
         settings.pack(fill="x", pady=(0, 10))
-        labels = ("芯片", "波特率", "Flash 模式", "Flash 频率", "Flash 大小", "烧录后")
-        for col, label in enumerate(labels):
-            ttk.Label(settings, text=label).grid(row=0, column=col, sticky="w", padx=(0, 8))
-        ttk.Combobox(settings, textvariable=self.chip_var, values=("auto", "esp32", "esp32s2", "esp32s3", "esp32c3", "esp32c2", "esp32c6", "esp32h2"), state="readonly", width=10).grid(row=1, column=0, sticky="ew", padx=(0, 8))
-        ttk.Combobox(settings, textvariable=self.baud_var, values=(FAST_AUTO_BAUD_LABEL, "1500000", "921600", "460800", "230400", "115200"), state="readonly", width=12).grid(row=1, column=1, sticky="ew", padx=(0, 8))
-        ttk.Combobox(settings, textvariable=self.flash_mode_var, values=("dio", "qio", "dout", "qout", "keep"), state="readonly", width=10).grid(row=1, column=2, sticky="ew", padx=(0, 8))
-        ttk.Combobox(settings, textvariable=self.flash_freq_var, values=("40m", "80m", "60m", "48m", "30m", "26m", "20m", "keep"), state="readonly", width=10).grid(row=1, column=3, sticky="ew", padx=(0, 8))
-        ttk.Combobox(settings, textvariable=self.flash_size_var, values=("detect", "2MB", "4MB", "8MB", "16MB", "32MB", "64MB", "128MB", "keep"), state="readonly", width=10).grid(row=1, column=4, sticky="ew", padx=(0, 8))
-        ttk.Combobox(settings, textvariable=self.after_flash_var, values=("hard-reset", "soft-reset", "no-reset", "no-reset-stub"), state="readonly", width=12).grid(row=1, column=5, sticky="ew")
-        ttk.Checkbutton(settings, text="烧录前擦除整片 Flash", variable=self.erase_var).grid(row=2, column=0, columnspan=3, sticky="w", pady=(10, 0))
+        fields = [
+            ("芯片", self.chip_var, ("auto", "esp32", "esp32s2", "esp32s3", "esp32c3", "esp32c2", "esp32c6", "esp32h2")),
+            ("波特率", self.baud_var, (FAST_AUTO_BAUD_LABEL, "1500000", *BAUD_CANDIDATES)),
+            ("Flash 模式", self.flash_mode_var, ("dio", "qio", "dout", "qout", "keep")),
+            ("Flash 频率", self.flash_freq_var, ("40m", "80m", "60m", "48m", "30m", "26m", "20m", "keep")),
+            ("Flash 大小", self.flash_size_var, ("detect", "2MB", "4MB", "8MB", "16MB", "32MB", "64MB", "128MB", "keep")),
+            ("烧录后", self.after_flash_var, ("hard-reset", "soft-reset", "no-reset", "no-reset-stub")),
+        ]
+        for index, (label, variable, values) in enumerate(fields):
+            row, column = divmod(index, 3)
+            ttk.Label(settings, text=label).grid(row=row*2, column=column, sticky="w", padx=(0, 8), pady=(6, 3))
+            ttk.Combobox(settings, textvariable=variable, values=values, state="readonly", width=8).grid(row=row*2+1, column=column, sticky="ew", padx=(0, 8))
+            settings.columnconfigure(column, weight=1, uniform="field")
+        ttk.Checkbutton(settings, text="烧录前擦除整片 Flash", variable=self.erase_var).grid(row=4, column=0, columnspan=3, sticky="w", pady=(12, 0))
 
         files = ttk.LabelFrame(parent, text="烧录文件", padding=12, style="Card.TLabelframe")
         files.pack(fill="both", expand=True)
         header = ttk.Frame(files, style="Panel.TFrame")
         header.pack(fill="x", pady=(0, 6))
-        ttk.Label(header, text="类型", width=12).grid(row=0, column=0, padx=(0, 8), sticky="w")
-        ttk.Label(header, text="地址", width=11).grid(row=0, column=1, padx=(0, 8), sticky="w")
+        ttk.Label(header, text="类型", width=8).grid(row=0, column=0, padx=(0, 8), sticky="w")
+        ttk.Label(header, text="地址", width=9).grid(row=0, column=1, padx=(0, 8), sticky="w")
         ttk.Label(header, text="文件路径").grid(row=0, column=2, sticky="w")
         header.columnconfigure(2, weight=1)
         self.rows_frame = ttk.Frame(files, style="Panel.TFrame")
@@ -471,30 +502,28 @@ class Esp32FlasherApp(tk.Tk):
         ttk.Button(file_buttons, text="清空文件", command=self.clear_rows).pack(side="left", padx=(8, 0))
         ttk.Button(file_buttons, text="清空日志", command=self.clear_log).pack(side="right")
 
-    def update_developer_scrollregion(self, _event=None):
-        self.developer_canvas.configure(scrollregion=self.developer_canvas.bbox("all"))
-
-    def resize_developer_window(self, event):
-        self.developer_canvas.itemconfigure(self.developer_window, width=event.width)
-
-    def bind_developer_mousewheel(self, _event=None):
-        return
-
-    def unbind_developer_mousewheel(self, _event=None):
-        return
-
-    def on_developer_mousewheel(self, event):
-        if self.mode_var.get() == DEVELOPER_MODE:
-            self.developer_canvas.yview_scroll(int(-event.delta / 120), "units")
-
     def apply_mode(self):
         if self.mode_var.get() == DEVELOPER_MODE:
-            self.developer_frame.pack(fill="both", expand=True, pady=(12, 0), before=self.log_text.master)
-            self.log_text.configure(height=12, wrap="none")
+            self.developer_frame.pack(fill="x", pady=(12, 0), before=self.log_text.master)
         else:
             self.developer_frame.pack_forget()
-            self.unbind_developer_mousewheel()
-            self.log_text.configure(height=7, wrap="word")
+
+    def load_dropped_files(self, paths):
+        if self.running or self.ota_page.running or self.ota_page.scanning:
+            messagebox.showinfo("任务正在进行", "请等待当前任务结束后，再拖入新的固件。")
+            return
+        from file_drop import firmware_drop_target
+        try:
+            target, path = firmware_drop_target(paths)
+            if target == "serial":
+                self.notebook.select(0)
+                self.serial_scroll.top()
+                self.load_package(path)
+            elif self.ota_page.load_firmware(path):
+                self.notebook.select(self.ota_page)
+                self.ota_page.scroll.top()
+        except ValueError as error:
+            messagebox.showerror("无法导入固件", str(error))
 
     def refresh_ports(self):
         ports = list_serial_ports()
@@ -510,25 +539,28 @@ class Esp32FlasherApp(tk.Tk):
             self.load_package(path)
 
     def load_package(self, zip_path):
+        if self.running or self.ota_page.running or self.ota_page.scanning:
+            return
         if not zipfile.is_zipfile(zip_path):
             messagebox.showerror("固件包错误", "请选择有效的 ZIP 压缩包")
             return
 
-        self.cleanup_package_dir()
-        self.package_temp_dir = tempfile.mkdtemp(prefix="esp32_firmware_")
+        candidate_dir = tempfile.mkdtemp(prefix="esp32_firmware_")
         try:
-            safe_extract_zip(zip_path, self.package_temp_dir)
-            entries, settings, manifest_path = load_json_manifest(self.package_temp_dir)
+            safe_extract_zip(zip_path, candidate_dir)
+            entries, settings, manifest_path = load_json_manifest(candidate_dir)
             source = "flasher_args.json"
             if not entries:
-                entries, flash_args_path = load_text_flash_args(self.package_temp_dir)
+                entries, flash_args_path = load_text_flash_args(candidate_dir)
                 source = os.path.basename(flash_args_path) if flash_args_path else "文件名规则"
             if not entries:
-                entries = infer_flash_files(self.package_temp_dir)
+                entries = infer_flash_files(candidate_dir)
                 source = "文件名规则"
             if not entries:
                 raise ValueError("压缩包中没有识别到可烧录的 .bin 文件")
 
+            self.cleanup_package_dir()
+            self.package_temp_dir = candidate_dir
             self.apply_flash_settings(settings)
             self.package_var.set(os.path.normpath(zip_path))
             self.set_rows(entries)
@@ -539,7 +571,7 @@ class Esp32FlasherApp(tk.Tk):
             self.append_log(self.firmware_summary(entries) + "\n")
             self.status_var.set("固件识别完成")
         except Exception as exc:
-            self.cleanup_package_dir()
+            shutil.rmtree(candidate_dir, ignore_errors=True)
             messagebox.showerror("加载失败", str(exc))
 
     def apply_flash_settings(self, settings):
@@ -619,6 +651,8 @@ class Esp32FlasherApp(tk.Tk):
         self.log_text.configure(state="disabled")
 
     def set_running(self, running):
+        self.running = running
+        self.package_button.configure(state="disabled" if running else "normal")
         self.flash_button.configure(state="disabled" if running else "normal")
         self.stop_button.configure(state="normal" if running else "disabled")
 
@@ -635,6 +669,11 @@ class Esp32FlasherApp(tk.Tk):
         }
 
     def start_flash(self):
+        if self.running:
+            return
+        if self.ota_page.running or self.ota_page.scanning:
+            messagebox.showinfo("OTA 正在进行", "请等待无线升级结束后再开始串口下载。")
+            return
         try:
             files = self.collect_flash_files()
             self.ensure_packaged_runtime()
@@ -643,6 +682,7 @@ class Esp32FlasherApp(tk.Tk):
             return
 
         self.clear_log()
+        self.stop_requested.clear()
         self.progress_var.set(0)
         self.progress_text_var.set("进度：0% - 准备下载")
         self.set_running(True)
@@ -656,11 +696,8 @@ class Esp32FlasherApp(tk.Tk):
         self.worker.start()
 
     def ensure_packaged_runtime(self):
-        if not getattr(sys, "frozen", False):
-            return
-        helper_path = esptool_command_prefix()[0]
-        if not os.path.exists(helper_path):
-            raise ValueError("缺少 esptool_runner.exe。请把 ESP32Flasher.exe 和 esptool_runner.exe 放在同一目录后再运行。")
+        # 单文件发行版通过自身的 --run-esptool 模式启动内置烧录器。
+        return
 
     def run_flash_workflow(self, port_setting, settings, files):
         port = ""
@@ -684,6 +721,9 @@ class Esp32FlasherApp(tk.Tk):
 
         bauds = BAUD_CANDIDATES if settings["baud"] == FAST_AUTO_BAUD_LABEL else (settings["baud"],)
         for index, baud in enumerate(bauds):
+            if self.stop_requested.is_set():
+                self.log_queue.put(("done", -1))
+                return
             if index > 0:
                 self.emit_progress(0, "准备降速重试")
             self.emit_progress(8, f"准备连接 {baud}")
@@ -746,6 +786,8 @@ class Esp32FlasherApp(tk.Tk):
         return commands
 
     def run_command(self, cmd, progress_start=0, progress_end=100, default_status="正在执行", files=None):
+        if self.stop_requested.is_set():
+            return -1
         try:
             creationflags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
             self.process = subprocess.Popen(
@@ -864,6 +906,7 @@ class Esp32FlasherApp(tk.Tk):
         return default_status
 
     def stop_flash(self):
+        self.stop_requested.set()
         if self.process and self.process.poll() is None:
             self.process.terminate()
             time.sleep(0.2)
@@ -872,7 +915,7 @@ class Esp32FlasherApp(tk.Tk):
         self.append_log("\n已停止。\n")
         self.status_var.set("已停止")
         self.progress_var.set(0)
-        self.set_running(False)
+        self.stop_button.configure(state="disabled")
 
     def drain_log_queue(self):
         try:
@@ -903,7 +946,10 @@ class Esp32FlasherApp(tk.Tk):
                 elif kind == "done":
                     self.process = None
                     self.set_running(False)
-                    if payload == 0:
+                    if self.stop_requested.is_set():
+                        self.status_var.set("已停止下载")
+                        self.progress_text_var.set("下载已停止")
+                    elif payload == 0:
                         self.status_var.set("下载完成")
                         self.progress_var.set(100)
                         self.progress_text_var.set("进度：100% - 下载完成")
@@ -925,14 +971,32 @@ class Esp32FlasherApp(tk.Tk):
         self.package_temp_dir = ""
 
     def on_close(self):
-        if self.process and self.process.poll() is None:
+        if self.ota_page.running or self.ota_page.scanning:
+            messagebox.showinfo("无线任务进行中", "请等待版本读取或升级结束并恢复网络后，再关闭平台。")
+            return
+        if self.running:
             if not messagebox.askyesno("确认退出", "下载正在进行，确定要停止并退出吗？"):
                 return
             self.stop_flash()
+            # 等待后台退出后再释放临时固件目录，防止文件仍被烧录进程使用。
+            self.after(150, self._close_when_idle)
+            return
+        self.cleanup_package_dir()
+        self.destroy()
+
+    def _close_when_idle(self):
+        if self.worker and self.worker.is_alive():
+            self.after(150, self._close_when_idle)
+            return
         self.cleanup_package_dir()
         self.destroy()
 
 
 if __name__ == "__main__":
+    if "--run-esptool" in sys.argv:
+        import esptool
+        marker = sys.argv.index("--run-esptool")
+        result = esptool.main(sys.argv[marker + 1:])
+        raise SystemExit(result if isinstance(result, int) else 0)
     app = Esp32FlasherApp()
     app.mainloop()

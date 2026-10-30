@@ -1,15 +1,17 @@
 # -*- mode: python ; coding: utf-8 -*-
 import os
+from PyInstaller.utils.hooks import collect_all
 
 
 ROOT = os.path.abspath(os.path.join(SPECPATH, ".."))
+esptool_datas, esptool_binaries, esptool_imports = collect_all("esptool")
 
 a = Analysis(
     [os.path.join(ROOT, "src", "esp32_flasher_gui.py")],
     pathex=[ROOT],
-    binaries=[],
-    datas=[(os.path.join(ROOT, "assets"), "assets")],
-    hiddenimports=[],
+    binaries=esptool_binaries,
+    datas=[(os.path.join(ROOT, "assets"), "assets")] + esptool_datas,
+    hiddenimports=esptool_imports + ["serial.tools.list_ports_windows", "ota_ui", "batch_ota"],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -25,7 +27,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name="ESP32Flasher",
+    name="Ys元思烧录平台",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -39,5 +41,6 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     version=os.path.join(ROOT, "packaging", "version_info_main.txt"),
-    icon=[os.path.join(ROOT, "assets", "esp32_flasher.ico")],
+    icon=[os.path.join(ROOT, "assets", "ysneuro.ico")],
+    manifest=os.path.join(ROOT, "packaging", "app.manifest"),
 )
